@@ -3,19 +3,18 @@
  * @brief NimBLE server/client implementation for the ESP32-C3 bridge.
  */
 
-#if defined(ESP32) && defined(BLUETOOTH_BLE)
-
-#ifdef ARDUINO_ESP32C3_DEV
-
 #include "BLEManager.hpp"
 
+#if defined(ESP32) && defined(TRANSMISSION_BLE)
+
+#ifdef ARDUINO_ESP32C3_DEV
 namespace {
 // NimBLE callbacks need to reach the owning manager; a single instance exists.
 BLEManager* g_instance = nullptr;
 } // namespace
 
-BLEManager::BLEManager(LEDManager& led, SerialManager& serial)
-  : _led(led), _serial(serial) {
+BLEManager::BLEManager(LEDManager& led, SerialManager& serial, BridgeMode bridge_mode)
+  : _led(led), _serial(serial), _bridgeMode(bridge_mode) {
   g_instance = this;
 }
 
@@ -72,44 +71,72 @@ void BLEManager::onPeerDisconnect() {
 void BLEManager::handleBleWrite(const uint8_t* data, size_t len) {
   DEBUG_PRINTF("onWrite: %u bytes\r\n", (unsigned)len);
 
-#if (COMMANDER == CMD_MIT_APPINVENTOR)
+  switch (_bridgeMode) {
+    case BridgeMode::RawPassthrough:
+      forwardRawWrite(data, len);
+      break;
+
+    case BridgeMode::ValidatedPassthrough:
+      forwardValidatedWrite(data, len);
+      break;
+
+    case BridgeMode::AckedBridge:
+      forwardAckedWrite(data, len);
+      break;
+
+    default:
+      DEBUG_PRINTLN("Unsupported BLE bridge mode");
+      break;
+  }
+}
+
+void BLEManager::forwardRawWrite(const uint8_t* data, size_t len) {
   _serial.writeFrame(data, len);
-#elif (COMMANDER == CMD_TRANSMITTER)
+}
+
+bool BLEManager::validateIncomingFrame(const uint8_t* data, size_t len, uint8_t* seq) const {
   if (len < (SerialManager::FRAME_HEADER_SIZE + SerialManager::CRC_SIZE)) {
     DEBUG_PRINTLN("Frame too short");
+    return false;
+  }
+
+  if (seq != nullptr) {
+    *seq = data[2];
+  }
+
+  if (!SerialManager::checkFrame(data + 2, len - 2)) {
+    DEBUG_PRINTLN("Invalid frame received (CRC error)");
+    return false;
+  }
+
+  return true;
+}
+
+void BLEManager::forwardValidatedWrite(const uint8_t* data, size_t len) {
+  if (!validateIncomingFrame(data, len)) {
     return;
   }
 
-  if (SerialManager::checkFrame(data + 2, len - 2)) {
-    _serial.writeFrame(data, len);
-  } else {
-    DEBUG_PRINTLN("Invalid frame received (CRC error)");
-  }
-#else // SERVER MODE: validate frame and send ACK back to client
-  if (len < (SerialManager::FRAME_HEADER_SIZE + SerialManager::CRC_SIZE)) {
-    DEBUG_PRINTLN("Frame too short");
-    sendAck(0, SerialManager::ACK_STATUS_CRC_ERROR);
-    return;
-  }
+  _serial.writeFrame(data, len);
+}
 
-  const uint8_t seq = data[2];
-  // CRC is over: seq + timestamp + type + length + payload.
-  // Forward to STM32 only if frame is valid.
-  if (SerialManager::checkFrame(data + 2, len - 2)) {
-    const bool ok = _serial.sendFrameAndWaitAck(
-      data, len, seq, SerialManager::STM32_ACK_TIMEOUT_MS);
-    if (ok) {
-      DEBUG_PRINTLN("ACK received from STM32: OK");
-      sendAck(seq, SerialManager::ACK_STATUS_OK);
-    } else {
-      DEBUG_PRINTLN("ACK received from STM32: ERROR or TIMEOUT");
-      sendAck(seq, SerialManager::ACK_STATUS_TIMEOUT);
-    }
-  } else {
-    DEBUG_PRINTLN("Invalid frame received (CRC error)");
+void BLEManager::forwardAckedWrite(const uint8_t* data, size_t len) {
+  uint8_t seq = 0;
+
+  if (!validateIncomingFrame(data, len, &seq)) {
     sendAck(seq, SerialManager::ACK_STATUS_CRC_ERROR);
+    return;
   }
-#endif
+
+  const bool ok = _serial.sendFrameAndWaitAck(
+    data, len, seq, SerialManager::STM32_ACK_TIMEOUT_MS);
+  if (ok) {
+    DEBUG_PRINTLN("ACK received from STM32: OK");
+    sendAck(seq, SerialManager::ACK_STATUS_OK);
+  } else {
+    DEBUG_PRINTLN("ACK received from STM32: ERROR or TIMEOUT");
+    sendAck(seq, SerialManager::ACK_STATUS_TIMEOUT);
+  }
 }
 
 void BLEManager::sendAck(uint8_t seq, uint8_t status) {
@@ -295,4 +322,4 @@ bool BLEManager::sendToPeer(const uint8_t* data, size_t len) {
 #endif // BLE_FLAVOR
 
 #endif // ARDUINO_ESP32C3_DEV
-#endif // ESP32 && BLUETOOTH_BLE
+#endif // ESP32 && TRANSMISSION_BLE

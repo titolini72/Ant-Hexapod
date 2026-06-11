@@ -47,14 +47,14 @@ Configuration is centralized in [config.h](config.h).
 ### 3.1 Logging and Modes
 
 - SERIAL_DEBUG enables DEBUG_PRINT macros
-- BLUETOOTH_BLE enables the ESP UART link on the STM32 side
+- TRANSMISSION_BLE enables the ESP UART link on the STM32 side
 - COMMANDER selects the active control protocol:
   - CMD_MIT_APPINVENTOR = single-byte command mode
   - CMD_PC = framed servo-angle streaming mode
   - CMD_TRANSMITTER = framed joystick/button mode
   - CMD_MANUAL_TEST = direct serial bone test mode
 
-Current default in [config.h](config.h) is `#define COMMANDER CMD_PC` with `BLUETOOTH_BLE` enabled.
+Current default in [config.h](config.h) is `#define COMMANDER CMD_PC` with `TRANSMISSION_BLE` enabled.
 
 ### 3.2 Sensor Selection
 
@@ -85,7 +85,7 @@ Implemented in [src/Weact/main.cpp](src/Weact/main.cpp):
 3. Put LEDs into running mode and set the default robot speed
 4. Move the robot into its idle pose
 5. Initialize the selected sensor manager (sonar or ToF)
-6. Initialize the ESP UART link when `BLUETOOTH_BLE` is enabled
+6. Initialize the ESP UART link when `TRANSMISSION_BLE` is enabled
 7. Register the serial frame handler for the selected `COMMANDER` mode
 8. In the main loop:
   - poll inbound serial/BLE data through `SerialProtocolHandler`

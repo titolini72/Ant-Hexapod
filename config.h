@@ -16,19 +16,23 @@
 #define CMD_TRANSMITTER 2
 #define CMD_MANUAL_TEST 3
 
+#ifndef COMMANDER
 #define COMMANDER CMD_TRANSMITTER
+#endif
 
 #define LINK_TRANSPORT_BLE 0
 #define LINK_TRANSPORT_NRF24 1
+#define LINK_TRANSPORT_NONE 2
 
 #ifndef LINK_TRANSPORT
 #define LINK_TRANSPORT LINK_TRANSPORT_BLE
 #endif
 
 #if (LINK_TRANSPORT == LINK_TRANSPORT_BLE)
-#define BLUETOOTH_BLE
+#define TRANSMISSION_BLE
 #elif (LINK_TRANSPORT == LINK_TRANSPORT_NRF24)
 #define NRF24_LINK
+#elif (LINK_TRANSPORT == LINK_TRANSPORT_NONE)
 #else
 #error "Unsupported LINK_TRANSPORT selection."
 #endif
@@ -36,8 +40,8 @@
 #define POWER_MANAGER_DEBUG
 #define SENSOR_MANAGER_DEBUG
 
-#if defined(BLUETOOTH_BLE) && (COMMANDER == CMD_MANUAL_TEST)
-#error "CMD_MANUAL_TEST and BLUETOOTH_BLE cannot be defined at the same time."
+#if defined(TRANSMISSION_BLE) && (COMMANDER == CMD_MANUAL_TEST)
+#error "CMD_MANUAL_TEST and TRANSMISSION_BLE cannot be defined at the same time."
 #endif
 
 #if defined(NRF24_LINK) && (COMMANDER != CMD_TRANSMITTER)
@@ -55,7 +59,7 @@
 #define NUM_BUTTONS 6
 #endif
 
-#if defined(BLUETOOTH_BLE)
+#if defined(TRANSMISSION_BLE)
 #define UART_BAUDRATE 921600
 #endif
 
@@ -136,7 +140,7 @@
 
 #define SERIAL_BAUDRATE 115200     // Main serial interface baudrate
 
-#if defined (BLUETOOTH_BLE)
+#if defined (TRANSMISSION_BLE)
 #define ESP Serial4                // ESP serial interface
 #endif
 
@@ -175,8 +179,6 @@
 #define NRF24_TX_ADDRESS "AntTx"
 #endif
 
-#define DEFAULT_SPEED 50           // Default movement speed
-
 #define ADC_PIN A3                 // Analog pin for voltage monitoring
 #define ADC_MAX_VOLTAGE 3.3        // Maximum ADC reference voltage
 #define ADC_RANGE 1023.0           // ADC Maximum range
@@ -185,10 +187,10 @@
 #define ADC_VOLTAGE_THRESHOLD 11.0 // in volts
 
 
-#define DEFAULT_ANT_SPEED (10)
+#define DEFAULT_ANT_SPEED (20) // Default movement speed
 #endif
 
-#if defined(ESP32) && defined(BLUETOOTH_BLE)
+#if defined(ESP32) && defined(TRANSMISSION_BLE)
 // ============================================================
 // Build selection
 // 0 = BLE server

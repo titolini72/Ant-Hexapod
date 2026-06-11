@@ -6,7 +6,7 @@
 
 #include "SerialManager.hpp"
 
-#if defined(ESP32) && defined(BLUETOOTH_BLE)
+#if defined(ESP32) && defined(TRANSMISSION_BLE)
 
 #ifdef ARDUINO_ESP32C3_DEV
 
@@ -204,4 +204,4 @@ void SerialManager::pollFrames() {
 }
 
 #endif // ARDUINO_ESP32C3_DEV
-#endif // ESP32 && BLUETOOTH_BLE
+#endif // ESP32 && TRANSMISSION_BLE

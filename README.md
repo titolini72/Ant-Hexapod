@@ -141,7 +141,7 @@ The STM32 firmware selects its runtime control protocol in `config.h` using the 
 ### Default Configuration
 
 ```
-BLUETOOTH_BLE     = enabled    (STM32 ↔ ESP32 UART bridge)
+TRANSMISSION_BLE     = enabled    (STM32 ↔ ESP32 UART bridge)
 COMMANDER         = CMD_PC     (host-based framed control)
 SONAR_DETECTION   = enabled    (HC-SR04 obstacle detection)
 TOF_DETECTION     = disabled   (VL53L0x; set to 1 to enable)
@@ -198,7 +198,7 @@ On power-up, the STM32 firmware executes the following initialization:
 3. **LED and speed initialization** – Set default motion speed and indicator LEDs
 4. **Idle pose** – Move servos to safe resting position
 5. **Sensor startup** – Initialize sonar or ToF obstacle detection
-6. **ESP UART bridge** – Start BLE/UART relay (if `BLUETOOTH_BLE` enabled)
+6. **ESP UART bridge** – Start BLE/UART relay (if `TRANSMISSION_BLE` enabled)
 7. **Commander registration** – Install handler for selected control mode
 
 ### CMD_PC Mode Operation

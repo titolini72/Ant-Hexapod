@@ -5,7 +5,14 @@
  */
 #endif
 
-#if defined(ESP32) && defined(BLUETOOTH_BLE)
+#include <Arduino.h>
+
+#include "../config.h"
+#include "LEDManager.hpp"
+#include "SerialManager.hpp"
+#include "BLEManager.hpp"
+
+#if defined(ESP32) && defined(TRANSMISSION_BLE)
 
 #ifdef ARDUINO_uPesy_WROOM
 #include <PS4Controller.h>
@@ -130,7 +137,16 @@ void loop() {
 namespace {
 LEDManager status_led(STATUS_LED_PIN);
 SerialManager serial_link;
-BLEManager ble(status_led, serial_link);
+
+#if (COMMANDER == CMD_MIT_APPINVENTOR)
+constexpr BLEManager::BridgeMode BLE_BRIDGE_MODE = BLEManager::BridgeMode::RawPassthrough;
+#elif (COMMANDER == CMD_TRANSMITTER)
+constexpr BLEManager::BridgeMode BLE_BRIDGE_MODE = BLEManager::BridgeMode::ValidatedPassthrough;
+#else
+constexpr BLEManager::BridgeMode BLE_BRIDGE_MODE = BLEManager::BridgeMode::AckedBridge;
+#endif
+
+BLEManager ble(status_led, serial_link, BLE_BRIDGE_MODE);
 } // namespace
 
 /**
@@ -185,4 +201,4 @@ void loop() {
   Serial.println("No Bluetooth mode defined. Please check your config.h.");
   delay(1000);
 }
-#endif // ESP32 && BLUETOOTH_BLE
+#endif // ESP32 && TRANSMISSION_BLE

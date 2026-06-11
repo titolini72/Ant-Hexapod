@@ -15,7 +15,7 @@
 SensorManager *SensorManager::instance = NULL;
 
 void SensorManager::echoISR() {
-  if (!instance->_waitingForPulse) return;
+  if (instance == NULL || !instance->_waitingForPulse) return;
 
   if (digitalRead(instance->_echoPin)) {
     // Rising edge
@@ -38,6 +38,7 @@ SensorManager::SensorManager(unsigned char trigPin,
                              unsigned char echoPin,
                              uint16_t measurementPeriodMs,
                              uint16_t obstacleThresholdMm) {
+  instance = this;
   this->_trigPin = trigPin;
   this->_echoPin = echoPin;
   this->_now = millis();

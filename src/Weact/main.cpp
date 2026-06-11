@@ -16,7 +16,7 @@
 #include "Bone.hpp"
 #include "Hexapod.hpp"
 #include "PowerManager.hpp"
-#if defined(BLUETOOTH_BLE)
+#if defined(TRANSMISSION_BLE)
 #include "SerialProtocolHandler.hpp"
 #endif
 #if defined(NRF24_LINK)
@@ -38,6 +38,28 @@ Hexapod myAnt;
 
 namespace {
 constexpr uint8_t SPEED_COMMAND_OFFSET = 100;
+#if (COMMANDER == CMD_TRANSMITTER)
+constexpr uint8_t ATTACK_BUTTON_INDEX = NUM_BUTTONS - 1;
+constexpr uint8_t BITE_BUTTON_INDEX = 3;
+constexpr unsigned long ATTACK_SEQUENCE_DURATION_MS = 5500;
+constexpr unsigned long TRANSMITTER_FRAME_TIMEOUT_MS = 500;
+
+struct TransmitterInputState {
+  uint16_t headX = 512;
+  uint16_t headY = 512;
+  uint16_t legX = 512;
+  uint16_t legY = 512;
+  uint16_t potentiometers[NUM_POTENTIOMETERS] = {0};
+  uint8_t buttons[NUM_BUTTONS] = {0};
+  bool hasFrame = false;
+};
+
+TransmitterInputState transmitterInput;
+bool attackSequenceActive = false;
+bool attackTriggerArmed = true;
+unsigned long attackSequenceStartMs = 0;
+unsigned long lastTransmitterFrameTimestamp = 0;
+#endif
 } // namespace
 
 unsigned long lastManualTimestamp = millis();
@@ -58,9 +80,8 @@ static constexpr uint16_t DEFAULT_MIT_PAYLOAD_SIZE = 2;
 #endif
 
 int command = 0;
-unsigned char speed = DEFAULT_SPEED;
 
-#if defined(BLUETOOTH_BLE)
+#if defined(TRANSMISSION_BLE)
 const uint8_t* s_buffer = nullptr;
 #endif
 
@@ -94,13 +115,25 @@ NRF24Manager radioLink(nrf24Spi, NRF24_CE_PIN, NRF24_CSN_PIN, NRF24_IRQ_PIN);
 #endif
 
 #if (COMMANDER == CMD_PC)
-SerialProtocolHandler serialReader(ESP, DEFAULT_SERVO_FRAME_PAYLOAD_SIZE); // Frames arrive from the ESP32 over the UART link
+SerialProtocolHandler serialReader(ESP,
+                                   SerialProtocolHandler::ReceiveMode::Framed,
+                                   DEFAULT_SERVO_FRAME_PAYLOAD_SIZE,
+                                   SerialProtocolHandler::FRAME_TYPE_SERVO,
+                                   true); // Frames arrive from the ESP32 over the UART link
 #elif (COMMANDER == CMD_TRANSMITTER)
-#if defined(BLUETOOTH_BLE)
-SerialProtocolHandler serialReader(ESP, DEFAULT_TRANSMITTER_PAYLOAD_SIZE);
+#if defined(TRANSMISSION_BLE)
+SerialProtocolHandler serialReader(ESP,
+                                   SerialProtocolHandler::ReceiveMode::Framed,
+                                   DEFAULT_TRANSMITTER_PAYLOAD_SIZE,
+                                   SerialProtocolHandler::FRAME_TYPE_TRANSMITTER);
 #endif
 #elif (COMMANDER == MIT_APPINVENTOR)
-SerialProtocolHandler serialReader(ESP, DEFAULT_MIT_PAYLOAD_SIZE, '#');
+SerialProtocolHandler serialReader(ESP,
+                                   SerialProtocolHandler::ReceiveMode::LineDelimited,
+                                   DEFAULT_MIT_PAYLOAD_SIZE,
+                                   0,
+                                   false,
+                                   '#');
 #endif
 
 struct MoveConfig {
@@ -237,32 +270,29 @@ void processHeadStick(uint16_t rawX, uint16_t rawY) {
     const float DEADZONE = 0.15f;
     const float CENTER = 512.0f;
     const float MAX_DELTA = 512.0f;
+    const float GAMMA    = 1.6f;   // 1.7f
 
-    // 1. Convert to [-1, +1]
-    float roll = (rawX - CENTER) / MAX_DELTA;
-    float pitch = (rawY - CENTER) / MAX_DELTA;
+      // 1. Center and normalize to [-1, +1]
+    float roll = ((float)rawX - CENTER) / MAX_DELTA;
+    float pitch = ((float)rawY - CENTER) / MAX_DELTA;
 
-    // 2. Make UP = forward (positive Y)
-    // Remove this line if your gait system expects the opposite.
-    // y is already positive when stick is pushed up.
+    roll = clampf(roll, -1.0f, 1.0f);
+    pitch = clampf(pitch, -1.0f, 1.0f);
 
-    // 3. Compute magnitude
-    float r = sqrtf(roll * roll + pitch * pitch);
+    // 2. Magnitude
+    float r = fmaxf(fabs(roll), fabs(pitch));
 
-    // 4. Clamp to 1.0 (corners exceed 1.0)
-    if (r > 1.0f)
-        r = 1.0f;
-
-    // 5. Deadzone
+    // 3. Deadzone
     if (r < DEADZONE)
     {
         myAnt.getHead().idle();
         myAnt.getTail().idle();
         return;
     }
-    
-    // 6. Normalize speed after deadzone
+  
+    // 4. Normalize speed after deadzone
     float speed = (r - DEADZONE) / (1.0f - DEADZONE);
+    speed = powf(speed, GAMMA); // Optional: apply gamma curve for finer control at low speeds
 
     DEBUG_PRINT("[Head] rollDeg=");
     DEBUG_PRINT(roll * 100.0f);
@@ -279,51 +309,36 @@ void processHeadStick(uint16_t rawX, uint16_t rawY) {
     myAnt.getHead().pitch_head(-pitch* 100.0f);
 }
 
-void handleTransmitterPayload(const uint8_t* payload, uint16_t len) {
-
+void handleTransmitterPayload(const uint8_t* payload, uint16_t len)
+{
   if (len != DEFAULT_TRANSMITTER_PAYLOAD_SIZE) {
     DEBUG_PRINTLN("ERROR: Unexpected len");
+    return;
   }
+
   // Parse joystick data from buffer (assuming little-endian 16-bit values)
-  uint16_t joy1_x = (uint16_t)payload[0] | ((uint16_t)payload[1] << 8);
-  uint16_t joy1_y = (uint16_t)payload[2] | ((uint16_t)payload[3] << 8);
-  uint16_t joy2_x = (uint16_t)payload[4] | ((uint16_t)payload[5] << 8);
-  uint16_t joy2_y = (uint16_t)payload[6] | ((uint16_t)payload[7] << 8);
+  transmitterInput.headX = (uint16_t)payload[0] | ((uint16_t)payload[1] << 8);
+  transmitterInput.headY = (uint16_t)payload[2] | ((uint16_t)payload[3] << 8);
+  transmitterInput.legX = (uint16_t)payload[4] | ((uint16_t)payload[5] << 8);
+  transmitterInput.legY = (uint16_t)payload[6] | ((uint16_t)payload[7] << 8);
 
   // Offset for potentiometers and buttons (adjust based on actual struct layout)
   const uint8_t POT_OFFSET = NUM_JOYSTICKS * 2; // 4 joysticks * 2 bytes each
   const uint8_t BUTTONS_OFFSET = POT_OFFSET + (NUM_POTENTIOMETERS * 2);
-  //const uint8_t SW_OFFSET = BUTTONS_OFFSET + NUM_BUTTONS;
 
-  // Parse potentiometers (assuming uint16_t each)
   uint16_t potentiometers[NUM_POTENTIOMETERS];
   for (uint8_t i = 0; i < NUM_POTENTIOMETERS; i++) {
     uint8_t offset = POT_OFFSET + (i * 2);
     potentiometers[i] = (uint16_t)payload[offset] | ((uint16_t)payload[offset + 1] << 8);
+    transmitterInput.potentiometers[i] = potentiometers[i];
   }
 
-  // Parse buttons
-  uint8_t buttons[NUM_BUTTONS];
   for (uint8_t i = 0; i < NUM_BUTTONS; i++) {
-    buttons[i] = payload[BUTTONS_OFFSET + i];
+    transmitterInput.buttons[i] = payload[BUTTONS_OFFSET + i];
   }
-  if (buttons[3] == 1) {
-    myAnt.getHead().bite();
-  }
-  else {
-    myAnt.getHead().grip(map(potentiometers[0], 0, 1024, -100, 100));
-  }
-  // Parse switch
 
-  // Process joystick inputs
-  processLegStick(joy2_x, joy2_y);      // Joy2 controls leg movement
-  processHeadStick(joy1_x, joy1_y);     // Joy1 controls head (roll/pitch)
-
-  // Process buttons for commands
   for (uint8_t i = 0; i < NUM_BUTTONS; i++) {
-    if (buttons[i]) {
-      // Map button index to command
-      // Adjust this mapping based on your hardware layout
+    if (transmitterInput.buttons[i]) {
       command = i;
       DEBUG_PRINT("Button ");
       DEBUG_PRINT(i);
@@ -331,7 +346,56 @@ void handleTransmitterPayload(const uint8_t* payload, uint16_t len) {
     }
   }
 
-  //uint8_t sw = payload[SW_OFFSET];
+  transmitterInput.hasFrame = true;
+  lastTransmitterFrameTimestamp = millis();
+}
+
+void processTransmitterControl(unsigned long now) {
+  if (!transmitterInput.hasFrame) {
+    return;
+  }
+
+  if ((now - lastTransmitterFrameTimestamp) >= TRANSMITTER_FRAME_TIMEOUT_MS) {
+    transmitterInput.hasFrame = false;
+    attackSequenceActive = false;
+    attackTriggerArmed = true;
+    myAnt.idlePose();
+    return;
+  }
+
+  const bool manualAttackRequested = transmitterInput.buttons[ATTACK_BUTTON_INDEX] != 0;
+  const bool obstacleDetected = sensorManager.isObstacleAhead();
+  const bool shouldStartAttack = attackTriggerArmed && (manualAttackRequested || obstacleDetected);
+
+  if (shouldStartAttack) {
+    attackSequenceActive = true;
+    attackTriggerArmed = false;
+    attackSequenceStartMs = now;
+    DEBUG_PRINTLN("Attack sequence triggered");
+  }
+
+  if (attackSequenceActive) {
+    myAnt.attack_sequence(now);
+
+    if ((now - attackSequenceStartMs) >= ATTACK_SEQUENCE_DURATION_MS) {
+      attackSequenceActive = false;
+    }
+    return;
+  }
+
+  if (!manualAttackRequested && !obstacleDetected) {
+    attackTriggerArmed = true;
+  }
+
+  if (transmitterInput.buttons[BITE_BUTTON_INDEX] == 1) {
+    myAnt.getHead().bite();
+  } else {
+    myAnt.getHead().grip(map(transmitterInput.potentiometers[0], 0, 1024, -100, 100));
+  }
+
+  myAnt.getHead().set_speed(map(transmitterInput.potentiometers[1], 0, 1024, 50, 10));
+  processLegStick(transmitterInput.legX, transmitterInput.legY);
+  processHeadStick(transmitterInput.headX, transmitterInput.headY);
 }
 #endif
 
@@ -358,7 +422,7 @@ void setup() {
 
   sensorManager.setup();
 
-#ifdef BLUETOOTH_BLE
+#ifdef TRANSMISSION_BLE
   ESP.begin(UART_BAUDRATE);
 #endif
 
@@ -369,7 +433,7 @@ void setup() {
 #if (COMMANDER == CMD_PC)
   serialReader.setFrameHandler(handleServoPayload);
 #elif (COMMANDER == CMD_TRANSMITTER)
-#if defined(BLUETOOTH_BLE)
+#if defined(TRANSMISSION_BLE)
   serialReader.setFrameHandler(handleTransmitterPayload);
 #elif defined(NRF24_LINK)
   radioLink.setFrameHandler(handleTransmitterPayload);
@@ -378,8 +442,7 @@ void setup() {
 }
 
 #if (COMMANDER == CMD_MIT_APPINVENTOR)
-void executeCommand() {
-  usinged long now = millis();
+void executeCommand(unsigned long now) {
   switch (command) {
     case 0:
       if (!sensorManager.isObstacleAhead()) {
@@ -454,7 +517,7 @@ void executeCommand() {
 #endif
 
 void processLinkInput() {
-#if defined(BLUETOOTH_BLE)
+#if defined(TRANSMISSION_BLE)
   if (!serialReader.update()) {
     return;
   }
@@ -465,7 +528,7 @@ void processLinkInput() {
   DEBUG_PRINT("Received command: ");
   DEBUG_PRINTLN(s_buffer[0]);
   if (s_buffer[0] > SPEED_COMMAND_OFFSET) {
-    speed = s_buffer[0] - SPEED_COMMAND_OFFSET;
+    unsigned char speed = s_buffer[0] - SPEED_COMMAND_OFFSET;
     myAnt.set_speed(speed);
   } else {
     command = s_buffer[0];
@@ -597,6 +660,11 @@ void parseAndApplyManualCommand() {
     isValid = false;
   }
 
+  if (isValid && (bone < 0 || static_cast<size_t>(bone) >= myAnt.getBoneCount())) {
+    isValid = false;
+    DEBUG_PRINTLN("Invalid bone selection");
+  }
+
   if (isValid) {
     antBones[bone].move(localAngle);
     DEBUG_PRINTF("%d - Angle: %d\r\n", bone, localAngle);
@@ -659,16 +727,19 @@ void loop() {
   processLinkInput();
   updateLowBatteryLed();
 
+  powerManager.loop();
+  sensorManager.loop();
+
 #if (COMMANDER == MIT_APPINVENTOR)
-  executeCommand(now);
+  executeCommand(millis());
+#elif (COMMANDER == CMD_TRANSMITTER)
+  processTransmitterControl(millis());
 #elif (COMMANDER == CMD_MANUAL_TEST)
   processManualTestInput();
 #elif (COMMANDER == CMD_PC)
   processServoFrameTimeout();
 #endif
 
-  powerManager.loop();
-  sensorManager.loop();
   ledON.loop();
   ledLOW.loop();
 }

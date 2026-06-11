@@ -23,7 +23,13 @@
 
 class BLEManager {
 public:
-  BLEManager(LEDManager& led, SerialManager& serial);
+  enum class BridgeMode : uint8_t {
+    RawPassthrough,
+    ValidatedPassthrough,
+    AckedBridge,
+  };
+
+  BLEManager(LEDManager& led, SerialManager& serial, BridgeMode bridge_mode);
 
   /// Initialise NimBLE in the selected role.
   void begin();
@@ -53,8 +59,14 @@ public:
 #endif
 
 private:
+  void forwardRawWrite(const uint8_t* data, size_t len);
+  bool validateIncomingFrame(const uint8_t* data, size_t len, uint8_t* seq = nullptr) const;
+  void forwardValidatedWrite(const uint8_t* data, size_t len);
+  void forwardAckedWrite(const uint8_t* data, size_t len);
+
   LEDManager& _led;
   SerialManager& _serial;
+  BridgeMode _bridgeMode;
 
 #if BLE_FLAVOR == BLE_FLAVOR_SERVER
   bool _deviceConnected = false;
