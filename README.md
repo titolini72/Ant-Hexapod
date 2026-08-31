@@ -30,6 +30,7 @@ The Ant Hexapod is a 6-legged robot with comprehensive motion control and sensin
 - Obstacle detection via sonar (default) or ToF (VL53L0x) sensor
 - ESP32-C3 BLE/UART bridge for wireless telemetry and remote control
 - High-frequency servo control (50 Hz default via PC mode)
+ - Optional nRF24L01+ radio link (`NRF24_LINK`) for low-latency RF transmitter support
 
 ## Getting Started
 
@@ -253,6 +254,20 @@ On power-up, the STM32 firmware executes the following initialization:
   - Verify antenna placement on ESP32-C3
 
 ### Manual Servo Tuning (CMD_MANUAL_TEST)
+
+Before tuning a robot for a specific model, first switch to `CMD_MANUAL_TEST` in `config.h` and use the serial console to adjust each servo individually. This is the recommended step for model-specific calibration, because each ant build can have slightly different mechanical offsets, leg lengths, and neutral angles. Tune one servo at a time, verify the movement, and only then return to the normal `CMD_PC` control mode.
+
+Manual Test command format:
+- First letter: `L` / `R` / `H` / `T` = Left / Right / Head / Tail
+- Second letter: `F` / `M` / `B` / `P` / `R` / `G` / ` ` = Front / Middle / Back / Pitch / Roll / Grip / space
+- Third field: `F` / `T` / `E` / ` ` = Femur / Tibia / Feet / space for Tail
+- Last 3 digits: angle in degrees, with a leading `0` when needed
+
+Examples:
+- `LFE020` = Left Front Foot at 20°
+- `RMT080` = Right Middle Tibia at 80°
+- `HP 050` = Head Pitch at 50°
+- `T  095` = Tail at 95°
 
 If servos don't move smoothly or exhibit jerky behavior:
 

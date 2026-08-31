@@ -316,6 +316,30 @@ API highlights:
 
 This manager is compiled only when `TOF_DETECTION` is enabled.
 
+### 6.5 NRF24Manager (nRF24L01+ radio link)
+
+Defined in [include/NRF24Manager.hpp](include/NRF24Manager.hpp), implemented in [src/Weact/NRF24Manager.cpp](src/Weact/NRF24Manager.cpp).
+
+Purpose:
+- Optional nRF24L01+ radio link for low-latency RF transmitter/receiver support.
+- Compiled only when `NRF24_LINK` is defined in `config.h`.
+
+Key APIs:
+- `NRF24Manager(SPIClass& spi, uint32_t cePin, uint32_t csnPin, uint32_t irqPin)` — constructor
+- `bool begin()` — initialize SPI and radio, configure channel, addresses, PA/data rate/retries, enable dynamic payloads, start listening
+- `using FrameHandler = void (*)(const uint8_t* payload, uint16_t len)` and `void setFrameHandler(FrameHandler)` — register callback for received frames
+- `void poll()` — check radio for incoming frames and invoke handler
+- `bool isReady() const` — returns initialization state
+
+Behavior notes:
+- Uses the RF24 library; supports dynamic payloads up to 32 bytes. Addresses, channel, PA level, data rate and retry settings are read from `config.h` constants (e.g. `NRF24_RX_ADDRESS`, `NRF24_TX_ADDRESS`, `NRF24_CHANNEL`).
+- `poll()` reads available dynamic payloads and forwards them to the registered frame handler; invalid payload sizes are discarded.
+- The IRQ pin is used to reduce SPI polling when supported by the hardware.
+
+File map additions:
+- [include/NRF24Manager.hpp](include/NRF24Manager.hpp)
+- [src/Weact/NRF24Manager.cpp](src/Weact/NRF24Manager.cpp)
+
 ## 7. BLE Bridge Firmware (ESP32)
 
 Implemented in [src/ESP32/main.cpp](src/ESP32/main.cpp).
@@ -364,6 +388,20 @@ Input parsing maps:
   Ex T  095 (Tail at 95 Deg)
 
 On valid command, selected bone index receives direct move(angle).
+
+Before tuning the robot for a specific model, first switch to `COMMANDER == CMD_MANUAL_TEST` in [config.h](config.h) and use the serial console to adjust each servo individually. This is the safest way to calibrate the servos for the actual robot geometry, because every ant model can have slightly different leg offsets, joint limits, and neutral angles. Start with one leg or one head axis at a time, then validate the full motion before moving to the final `CMD_PC` control profile.
+
+Manual Test command format:
+- First letter: `L`/`R`/`H`/`T` = Left / Right / Head / Tail
+- Second letter: `F`/`M`/`B`/`P`/`R`/`G`/` ` = Front / Middle / Back / Pitch / Roll / Grip / space
+- Third field: `F`/`T`/`E`/` ` = Femur / Tibia / Feet / space for Tail
+- Last 3 digits: servo angle in degrees, with a leading `0` when needed
+
+Examples:
+- `LFE020` = Left Front Foot at 20°
+- `RMT080` = Right Middle Tibia at 80°
+- `HP 050` = Head Pitch at 50°
+- `T  095` = Tail at 95°
 
 Parsing behavior (current):
 - command parsing is triggered on newline/carriage return, or when the buffer reaches max length
