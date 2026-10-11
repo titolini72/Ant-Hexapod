@@ -298,6 +298,22 @@ If servos don't move smoothly or exhibit jerky behavior:
 - [WeAct STM32H7 Repo](https://github.com/weactstudio/weactstudio.ministm32f4x1) – Hardware documentation
 - [Espressif ESP32-C3 Docs](https://docs.espressif.com/projects/esp-idf/en/latest/esp32c3/) – ESP32-C3 reference
 
+### Hardware Files
+
+All hardware schematics, PCB source files and Gerber outputs for fabrication are stored in the `Building/Hardware` directory. Place PCB project files (KiCad/Eagle source), assembly drawings and Gerber/drill exports there so they are easy to find for manufacturing.
+
+Schematics are built thanks to EasyEDA. 
+
+Here is the share link to access the whole project:  https://oshwlab.com/titolini72/ant-hexapod_copy
+
+### 3D Models (STL)
+
+All 3D-printable models (STL) used to print the chassis, leg mounts, brackets and other mechanical parts are stored in the `Building/STL` directory.
+
+Within this directory, there are 2 STLs for the Head. One comes from original STL. The other is a custom version adding a slot for ToF and also an optional ESP32-CAM 
+
+For mechanical assembly tips and gait inspiration, see Dejan's Ant Hexapod project: https://howtomechatronics.com/projects/arduino-ant-hexapod-robot/
+
 ## Validation Status
 
 The current firmware has been built and uploaded successfully:
